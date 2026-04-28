@@ -372,7 +372,13 @@ async def translate_async(text: str, direction: str, req_headers: dict, batch: b
                 continue
             continue  # 429 → next model
 
-        print(f"\n[!] All Gemini models exhausted: {last_err}")
+        print(
+            f"\n{'!'*60}\n"
+            f"  ⚠️  DEGRADED MODE — все лимиты Gemini исчерпаны\n"
+            f"  Перевод недоступен, текст передаётся без перевода.\n"
+            f"  Последняя ошибка: {last_err}\n"
+            f"{'!'*60}\n"
+        )
         return chunk_text
 
     # ── en-ru: translate the WHOLE text in ONE call ──────────────────────────
@@ -773,15 +779,15 @@ async def handle_anthropic_request(request: web.Request) -> web.StreamResponse:
         _flog.debug("="*70)
     # ─────────────────────────────────────────────────────────────────────────
 
-    async with ClientSession() as session:
-     for attempt in range(len(_RETRY_DELAYS) + 1):
-      async with session.request(
+    session = _http_session
+    for attempt in range(len(_RETRY_DELAYS) + 1):
+     async with session.request(
             method=request.method,
             url=target_url,
             headers=headers,
             json=req_data if req_data else None,
             data=raw_body,
-      ) as resp:
+     ) as resp:
 
             # Retry on rate limit / overload before committing to a response
             if resp.status in _RETRY_STATUSES and request.path == "/v1/messages" and attempt < len(_RETRY_DELAYS):
@@ -1053,7 +1059,22 @@ async def handle_anthropic_request(request: web.Request) -> web.StreamResponse:
 
             return proxy_resp
 
+_http_session: ClientSession | None = None
+
+
+async def _on_startup(app: web.Application):
+    global _http_session
+    _http_session = ClientSession()
+
+
+async def _on_cleanup(app: web.Application):
+    if _http_session:
+        await _http_session.close()
+
+
 app = web.Application()
+app.on_startup.append(_on_startup)
+app.on_cleanup.append(_on_cleanup)
 # Catch-all route to intercept any path sent to Anthropic API
 app.router.add_route('*', '/{path:.*}', handle_anthropic_request)
 
