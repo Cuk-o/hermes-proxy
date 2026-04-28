@@ -524,13 +524,13 @@ class StreamProcessor:
 
 
 # Translation cache — LRU, max 500 entries, persisted to disk
-_CACHE_FILE = Path(__file__).parent / ".translation_cache.json"
+_CACHE_FILE = Path(__file__).resolve().parent / ".translation_cache.json"
 _CACHE_MAX_SIZE = 500
 _translation_cache: OrderedDict = OrderedDict()
 
 # Reverse cache: maps ru_response_text → en_response_text
 # Populated when we translate EN→RU responses; used to restore English in assistant history
-_EN_RESPONSE_CACHE_FILE = Path(__file__).parent / ".en_response_cache.json"
+_EN_RESPONSE_CACHE_FILE = Path(__file__).resolve().parent / ".en_response_cache.json"
 _EN_RESPONSE_CACHE_MAX = 200
 _en_response_cache: OrderedDict = OrderedDict()
 
