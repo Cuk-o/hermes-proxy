@@ -33,6 +33,7 @@ _RETRY_STATUSES = {429, 529}
 _RETRY_DELAYS = [2, 5, 15, 30]
 
 import logging
+from logging.handlers import RotatingFileHandler
 
 # ── Debug mode ────────────────────────────────────────────────────────────────
 DEBUG = os.getenv("PROXY_DEBUG", "1") == "1"
@@ -44,7 +45,7 @@ if DEBUG:
         level=logging.DEBUG,
         format="%(message)s",
         handlers=[
-            logging.FileHandler(_LOG_FILE, encoding="utf-8"),
+            RotatingFileHandler(_LOG_FILE, maxBytes=5*1024*1024, backupCount=3, encoding="utf-8"),
         ],
     )
 else:
