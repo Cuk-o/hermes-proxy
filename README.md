@@ -31,8 +31,8 @@ Claude Code CLI → proxy:8000 → api.anthropic.com
 
 ```bash
 # 1. Clone or download
-git clone <repo-url>
-cd antropic-token-saver
+git clone https://github.com/Cuk-o/hermes-proxy.git
+cd hermes-proxy
 
 # 2. Install dependencies
 pip install aiohttp google-genai python-dotenv
