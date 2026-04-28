@@ -238,6 +238,38 @@ def clean_for_log(text: str) -> str:
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
+
+def _mask_bearer_token(value: str) -> str:
+    """Mask Bearer token while keeping a tiny fingerprint for debugging."""
+    if not isinstance(value, str):
+        return "***"
+    if value.lower().startswith("bearer "):
+        token = value[7:].strip()
+        if len(token) <= 10:
+            return "Bearer ***"
+        return f"Bearer {token[:6]}...{token[-4:]}"
+    return "***"
+
+
+def _sanitize_headers_for_log(headers: CIMultiDict) -> dict:
+    """Redact sensitive headers before writing request dumps to disk."""
+    sensitive_headers = {
+        "authorization",
+        "proxy-authorization",
+        "x-api-key",
+        "api-key",
+        "cookie",
+        "set-cookie",
+    }
+    safe = {}
+    for key, value in dict(headers).items():
+        key_lower = key.lower()
+        if key_lower in sensitive_headers:
+            safe[key] = _mask_bearer_token(value) if key_lower == "authorization" else "***"
+        else:
+            safe[key] = value
+    return safe
+
 def log_translation(orig: str, trans: str, direction: str):
     if not orig.strip():
         return
@@ -503,8 +535,16 @@ _EN_RESPONSE_CACHE_MAX = 200
 _en_response_cache: OrderedDict = OrderedDict()
 
 
+def _resolve_cache_path(path: Path) -> Path:
+    """Use configured path when possible; fallback to current cwd if parent vanished."""
+    if path.parent.exists():
+        return path
+    return Path.cwd() / path.name
+
+
 def _load_disk_cache(path: Path, max_size: int) -> OrderedDict:
     """Load an OrderedDict cache from a JSON file."""
+    path = _resolve_cache_path(path)
     if not path.exists():
         return OrderedDict()
     try:
@@ -523,10 +563,12 @@ def _load_disk_cache(path: Path, max_size: int) -> OrderedDict:
 
 def _save_disk_cache(cache: OrderedDict, path: Path, max_size: int):
     """Persist cache to disk. Debounce externally if needed."""
+    path = _resolve_cache_path(path)
     try:
         # Trim before saving
         while len(cache) > max_size:
             cache.popitem(last=False)
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(dict(cache), ensure_ascii=False), encoding="utf-8")
     except Exception as e:
         print(f"[!] Failed to save cache {path.name}: {e}")
@@ -759,7 +801,7 @@ async def handle_anthropic_request(request: web.Request) -> web.StreamResponse:
     if DEBUG:
         _flog.debug("\n" + "="*70)
         _flog.debug(f"REQUEST: {request.method} {target_url}")
-        _flog.debug("HEADERS: " + json.dumps(dict(headers), indent=2))
+        _flog.debug("HEADERS: " + json.dumps(_sanitize_headers_for_log(headers), indent=2))
         if req_data:
             # Truncate long system/message content to keep log readable
             _log_data = json.loads(json.dumps(req_data))  # deep copy
