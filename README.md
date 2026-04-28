@@ -72,9 +72,9 @@ Optional env vars:
 |---|---|---|
 | `PROXY_DEBUG` | `1` | Print translation logs (`0` = silent) |
 
-### Anthropic API endpoint (config.json)
+### Proxy defaults (config.json)
 
-Create `config.json` in the project root to override defaults:
+If needed, create `config.json` in the project root to override proxy defaults:
 
 ```json
 {
@@ -85,6 +85,8 @@ Create `config.json` in the project root to override defaults:
 ```
 
 All fields are optional — omit any to keep the default.
+
+Note: this `config.json` configures the proxy itself. Claude Code endpoint is configured separately in `~/.claude/settings.json` via `ANTHROPIC_BASE_URL`.
 
 ## Running
 
