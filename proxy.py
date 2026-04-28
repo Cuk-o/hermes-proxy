@@ -477,6 +477,39 @@ async def translate_async(text: str, direction: str, req_headers: dict, batch: b
 
     return result
 
+# ── Plan file translation (tool_use interception) ────────────────────────────
+_PLAN_PATH_PATTERNS = (".claude/plans/", ".claude/todoplan")
+
+async def _translate_plan_file(filepath: str):
+    """Read a plan file from disk, translate EN→RU via Gemini, overwrite."""
+    path = Path(filepath).expanduser()
+    if not path.exists():
+        dbg(f"Plan file not found (yet?): {filepath}")
+        return
+    try:
+        content = path.read_text(encoding="utf-8")
+        if not content.strip():
+            return
+        cyrillic = sum(1 for c in content if '\u0400' <= c <= '\u04FF')
+        alpha = sum(1 for c in content if c.isalpha())
+        if alpha > 0 and cyrillic / alpha > 0.4:
+            dbg(f"Plan already Russian, skip: {filepath}")
+            return
+        translated = await translate_async(content, 'en-ru', {}, batch=True)
+        if translated and translated != content:
+            path.write_text(translated, encoding="utf-8")
+            print(f"  [plan] Translated: {path.name}")
+        else:
+            dbg(f"Plan translation unchanged: {filepath}")
+    except Exception as e:
+        print(f"[!] Failed to translate plan {filepath}: {e}")
+
+async def _delayed_translate_plan(filepath: str, delay: float = 3.0):
+    """Wait for CLI to write the file, then translate."""
+    await asyncio.sleep(delay)
+    await _translate_plan_file(filepath)
+
+
 class StreamProcessor:
     """Buffer full response, translate in ONE Gemini call at flush.
     Saves Gemini quota (1 call vs 20+) and avoids RU→RU translation."""
@@ -950,6 +983,10 @@ async def handle_anthropic_request(request: web.Request) -> web.StreamResponse:
                 # discard the translated text.
                 _pending_event_line = None
 
+                # Track tool_use blocks to detect plan file writes
+                _tool_use_blocks = {}   # index → {"name": str, "input_json": str}
+                _detected_plan_files = []
+
                 while not resp.content.at_eof():
                     line = await resp.content.readline()
                     if not line:
@@ -1030,6 +1067,20 @@ async def handle_anthropic_request(request: web.Request) -> web.StreamResponse:
                                 await write_safely(f"data: {json.dumps(event_data)}\n".encode('utf-8'))
 
                     elif event_data.get("type") in ("message_stop", "content_block_stop"):
+                        # ── Track tool_use: extract file path on block stop ──
+                        evt_type = event_data.get("type")
+                        idx = event_data.get("index")
+                        if evt_type == "content_block_stop" and idx in _tool_use_blocks:
+                            tracker = _tool_use_blocks.pop(idx)
+                            try:
+                                input_data = json.loads(tracker["input_json"])
+                                fpath = input_data.get("file_path") or input_data.get("path") or ""
+                                if any(pat in fpath for pat in _PLAN_PATH_PATTERNS) and fpath.endswith(".md"):
+                                    _detected_plan_files.append(fpath)
+                                    dbg(f"Detected plan file write: {fpath}")
+                            except (json.JSONDecodeError, Exception):
+                                pass
+
                         # Flush translated content BEFORE sending the stop
                         # event.  The held-back `event: content_block_stop`
                         # header has NOT been forwarded yet, so the client
@@ -1053,6 +1104,23 @@ async def handle_anthropic_request(request: web.Request) -> web.StreamResponse:
                             _pending_event_line = None
                         await write_safely(line)
                     else:
+                        # ── Track tool_use blocks for plan detection ─────────
+                        etype = event_data.get("type", "")
+                        if etype == "content_block_start":
+                            cb = event_data.get("content_block", {})
+                            if cb.get("type") == "tool_use":
+                                idx = event_data.get("index")
+                                _tool_use_blocks[idx] = {
+                                    "name": cb.get("name", ""),
+                                    "input_json": "",
+                                }
+                        elif etype == "content_block_delta":
+                            delta = event_data.get("delta", {})
+                            if delta.get("type") == "input_json_delta":
+                                idx = event_data.get("index")
+                                if idx in _tool_use_blocks:
+                                    _tool_use_blocks[idx]["input_json"] += delta.get("partial_json", "")
+
                         # Pass through thinking_delta, message_start, etc. unmodified
                         if _pending_event_line:
                             await write_safely(_pending_event_line)
@@ -1102,6 +1170,10 @@ async def handle_anthropic_request(request: web.Request) -> web.StreamResponse:
                 dbg(f"Stream done. Session so far: in_en={_session.input_tokens_en} out_en={_session.output_tokens_en}")
                 if DEBUG:
                     print(_session.summary())
+
+            # Schedule plan file translations (delayed to let CLI write first)
+            for plan_path in _detected_plan_files:
+                asyncio.create_task(_delayed_translate_plan(plan_path))
 
             return proxy_resp
 
