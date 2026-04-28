@@ -100,7 +100,7 @@ Proxy listens on `http://127.0.0.1:8000`.
 
 ### Permanent setup via Claude Code global config
 
-Instead of passing `ANTHROPIC_BASE_URL` every time, add it to `~/.claude/settings.json`:
+Instead of passing `ANTHROPIC_BASE_URL` every time, add it to `~/.claude/settings.json` (Claude Code's global config file):
 
 ```json
 {
@@ -110,7 +110,7 @@ Instead of passing `ANTHROPIC_BASE_URL` every time, add it to `~/.claude/setting
 }
 ```
 
-Claude Code will pick it up automatically on every launch.
+This is the recommended way — edit `~/.claude/settings.json` directly, not `config.json` in the project root. Claude Code will pick it up automatically on every launch.
 
 ## Token savings stats
 
