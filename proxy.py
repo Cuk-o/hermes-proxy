@@ -479,7 +479,7 @@ async def translate_async(text: str, direction: str, req_headers: dict, batch: b
     return result
 
 # ── Plan file translation (tool_use interception) ────────────────────────────
-_PLAN_PATH_PATTERNS = (".claude/plans/", ".claude/todoplan")
+_PLAN_PATH_PATTERNS = (".claude/plans/", ".claude/todoplan", "docs/superpowers/specs/")
 
 async def _translate_plan_file(filepath: str):
     """Read a plan file from disk, translate EN→RU via Gemini, overwrite."""
@@ -506,8 +506,18 @@ async def _translate_plan_file(filepath: str):
         print(f"[!] Failed to translate plan {filepath}: {e}")
 
 async def _delayed_translate_plan(filepath: str, delay: float = 3.0):
-    """Wait for CLI to write the file, then translate."""
-    await asyncio.sleep(delay)
+    """Poll until CLI writes the file, then translate (usually <0.3s)."""
+    path = Path(filepath).expanduser()
+    for _ in range(50):  # up to 5s in 0.1s steps
+        if path.exists() and path.stat().st_size > 0:
+            # Give a tiny buffer for the write to fully flush
+            await asyncio.sleep(0.1)
+            break
+        await asyncio.sleep(0.1)
+    else:
+        # File never appeared — last resort fallback
+        dbg(f"Plan file never appeared after 5s: {filepath}")
+        return
     await _translate_plan_file(filepath)
 
 
